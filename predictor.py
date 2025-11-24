@@ -5,8 +5,7 @@ import requests
 import random
 import os
 import asyncio # Adicionado para corrigir o RuntimeWarning e envio múltiplo
-from dotenv import load_dotenv
-load_dotenv()
+
 # --- CONFIGURAÇÕES DE ARQUIVOS E API ---
 DATA_FILE_RAW = "mega.csv" 
 DATA_FILE_CLEAN = "megasena_historico_limpo.csv"
