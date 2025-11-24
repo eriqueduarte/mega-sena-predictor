@@ -1,12 +1,14 @@
 name: Mega Sena Predictor Scheduler
 
-# Define o agendamento para rodar na quarta e sábado.
-# O horário abaixo é um exemplo (meia-noite UTC), ajuste para o seu fuso horário 
-# e o horário exato após o sorteio (Ex: 00 00 * * 3,6 é 21h em Brasília)
+# Adiciona o agendamento E o gatilho manual
 on:
   schedule:
-    # Rodar quarta-feira (3) e sábado (6). Altere o "0 3" para o horário desejado em UTC.
-    - cron: '0 3 * * 3,6' 
+    # Rodar às 22:00 BRT/BRST
+    - cron: '0 1 * * 3,6' 
+  
+  # ESTE BLOCO ATIVA O BOTÃO "Run workflow" NO PAINEL DE AÇÕES
+  workflow_dispatch: 
+    # (Não precisa de parâmetros aqui)
 
 jobs:
   run_script:
