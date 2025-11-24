@@ -1,10 +1,12 @@
-# predictor.py - VERSÃO FINAL, FUNCIONAL E AUTOMATIZADA
+# predictor.py - VERSÃO FINAL, FUNCIONAL E SEGURA
 
 import pandas as pd
 import requests
 import random
 import os
-
+import asyncio # Adicionado para corrigir o RuntimeWarning e envio múltiplo
+from dotenv import load_dotenv
+load_dotenv()
 # --- CONFIGURAÇÕES DE ARQUIVOS E API ---
 DATA_FILE_RAW = "mega.csv" 
 DATA_FILE_CLEAN = "megasena_historico_limpo.csv"
@@ -12,31 +14,54 @@ DATA_FILE_CLEAN = "megasena_historico_limpo.csv"
 # API pública gratuita de resultados de Loterias CAIXA
 API_URL_LATEST = "https://loteriascaixa-api.herokuapp.com/api/megasena/latest"
 
-# 🚨 CONFIGURAÇÃO DO TELEGRAM (SUBSTITUA PELOS SEUS DADOS) 🚨
-# Instale: poetry add python-telegram-bot
-TELEGRAM_TOKEN = "token do seu bot telegram"  # Ex: "123456789:ABCDefGhIJKlmNoPQRsTUVwxyZ"
-TELEGRAM_CHAT_ID = "ID telegram do chat ou canal"  # Ex: "-1001234567890" para canais/grupos, "123456789" para chats privados
+# 🚨 CONFIGURAÇÃO DO TELEGRAM (LENDO DE VARIÁVEIS DE AMBIENTE/SECRETS) 🚨
+# O GitHub Actions injeta os valores nas variáveis de ambiente!
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "TOKEN_DE_SEGURANCA_AQUI")
+
+# Recebe os IDs como uma única string separada por vírgulas e a converte em lista de IDs
+chat_ids_str = os.environ.get("TELEGRAM_CHAT_IDS", "")
+TELEGRAM_CHAT_IDS = [id.strip() for id in chat_ids_str.split(',') if id.strip()]
 
 # --- FUNÇÕES DE UTILIDADE E NOTIFICAÇÃO ---
 
 def send_telegram_message(message: str):
-    """Envia uma mensagem de texto para o chat configurado."""
+    """Envia a mensagem de texto para a lista de chats configurados de forma assíncrona."""
+    
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_IDS:
+        print("❌ Erro: Token ou Chat IDs do Telegram não configurados nas variáveis de ambiente.")
+        return
+
     try:
-        # A importação deve ser feita dentro da função para evitar erro se o pacote faltar
         from telegram import Bot
-        bot = Bot(token=TELEGRAM_TOKEN)
-        # Usando parse_mode='HTML' para formatação (negrito, código, quebra de linha)
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode='HTML')
-        print("✅ Mensagem de previsão enviada para o Telegram.")
+        
+        # Função assíncrona que envia a mensagem para um ID específico
+        async def send_to_recipient(chat_id):
+            bot = Bot(token=TELEGRAM_TOKEN)
+            await bot.send_message(chat_id=chat_id, text=message, parse_mode='HTML')
+            print(f"   -> Mensagem enviada para o Chat ID: {chat_id}")
+
+        # Cria uma lista de tarefas assíncronas (uma para cada destinatário)
+        tasks = [send_to_recipient(chat_id) for chat_id in TELEGRAM_CHAT_IDS]
+        
+        print(f"\nIniciando o envio para {len(tasks)} destinatário(s) configurado(s)...")
+        
+        # Executa todas as tarefas de envio simultaneamente
+        asyncio.run(asyncio.gather(*tasks))
+        
+        print("✅ Envio de previsão concluído para todos os destinatários.")
+        
     except ImportError:
         print("❌ Erro: Instale 'python-telegram-bot' com 'poetry add python-telegram-bot'.")
     except Exception as e:
-        print(f"❌ Erro ao enviar mensagem para o Telegram: {e}")
+        print(f"❌ Erro ao enviar mensagem para o Telegram. Verifique Token/IDs: {e}")
 
-# --- FUNÇÃO DE BUSCA DE API ---
+
+# --- RESTANTE DO CÓDIGO (INALTERADO) ---
 
 def fetch_latest_result(last_concurso_number):
-    """Busca o último concurso na API do GitHub e retorna o resultado se for novo."""
+# ... [Restante da função fetch_latest_result] ...
+# Mantenha o corpo da função inalterado
+# ...
     try:
         print(f">>> Buscando último resultado em: {API_URL_LATEST}")
         response = requests.get(API_URL_LATEST, timeout=15)
@@ -82,8 +107,9 @@ def fetch_latest_result(last_concurso_number):
 # --- FUNÇÕES DE ANÁLISE DE DADOS (Inalteradas) ---
 
 def load_and_clean_data():
-    """Carrega, limpa e prepara os dados para análise."""
-    
+# ... [Restante da função load_and_clean_data] ...
+# Mantenha o corpo da função inalterado
+# ...
     # Tenta ler o CSV limpo (preferencialmente)
     if os.path.exists(DATA_FILE_CLEAN):
         try:
@@ -96,7 +122,7 @@ def load_and_clean_data():
             print(f"⚠️ Aviso: Erro ao ler CSV limpo ({e}). Tentando processar o CSV bruto.")
             # O código continua abaixo para processar o bruto se o limpo falhar
             pass 
-        
+            
     # Processamento do Arquivo Bruto (Se limpo não existir ou falhar)
     if not os.path.exists(DATA_FILE_RAW):
         print(f"❌ Erro fatal: Arquivo de dados brutos '{DATA_FILE_RAW}' não encontrado.")
@@ -110,14 +136,14 @@ def load_and_clean_data():
         
         df = pd.read_csv(
             DATA_FILE_RAW, 
-            sep=',',               
+            sep=',',              
             encoding='iso-8859-1', 
             skipinitialspace=True, 
             header=None,           
             skiprows=2,            
             engine='python',       
             names=temp_names,      
-            on_bad_lines='warn'    
+            on_bad_lines='warn'   
         )
         
         cols_to_select_names = ['col_0', 'col_2', 'col_3', 'col_4', 'col_5', 'col_6', 'col_7']
@@ -143,7 +169,9 @@ def load_and_clean_data():
         return None
 
 def get_frequency_analysis(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcula a frequência absoluta de cada dezena já sorteada."""
+# ... [Restante da função get_frequency_analysis] ...
+# Mantenha o corpo da função inalterado
+# ...
     all_dezenas = pd.concat([df[col] for col in df.columns if 'Dezena' in col])
     all_dezenas = all_dezenas.dropna().astype(int) # Limpeza de segurança
     
@@ -158,9 +186,9 @@ def get_frequency_analysis(df: pd.DataFrame) -> pd.DataFrame:
     return frequency
 
 def predict_next_game(df: pd.DataFrame, num_jogos: int = 1) -> tuple:
-    """
-    Gera previsões estatísticas.
-    """
+# ... [Restante da função predict_next_game] ...
+# Mantenha o corpo da função inalterado
+# ...
     frequency_df = get_frequency_analysis(df)
     
     if frequency_df.empty:
@@ -183,24 +211,25 @@ def predict_next_game(df: pd.DataFrame, num_jogos: int = 1) -> tuple:
         
         # Se o pool for menor que 6, complementa com números aleatórios não usados
         if len(pool_dezenas) < 6:
-             missing_count = 6 - len(pool_dezenas)
-             complement = random.sample(list(all_numbers - set(pool_dezenas)), missing_count)
-             current_game_pool = pool_dezenas + complement
-             
+              missing_count = 6 - len(pool_dezenas)
+              complement = random.sample(list(all_numbers - set(pool_dezenas)), missing_count)
+              current_game_pool = pool_dezenas + complement
+              
         # Se o pool for muito grande, limitamos a 20 números para amostra (pode ser ajustado)
         if len(current_game_pool) > 20:
-             current_game_pool = random.sample(current_game_pool, 20)
+              current_game_pool = random.sample(current_game_pool, 20)
         
         prediction = sorted(random.sample(current_game_pool, 6))
         predictions.append(prediction)
         
     return predictions, frequency_df.head(10).to_string(index=False) 
 
-# --- FUNÇÃO PRINCIPAL DE AUTOMAÇÃO ---
+# --- FUNÇÃO PRINCIPAL DE AUTOMAÇÃO (Inalterada) ---
 
 def main():
-    """Função principal para executar a análise e notificar automaticamente."""
-    
+# ... [Restante da função main] ...
+# Mantenha o corpo da função inalterado
+# ...
     # 1. Carrega ou cria dados históricos
     df = load_and_clean_data()
     
