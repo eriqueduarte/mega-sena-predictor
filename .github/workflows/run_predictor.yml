@@ -1,0 +1,35 @@
+name: Mega Sena Predictor Scheduler
+
+# Define o agendamento para rodar na quarta e sábado.
+# O horário abaixo é um exemplo (meia-noite UTC), ajuste para o seu fuso horário 
+# e o horário exato após o sorteio (Ex: 00 00 * * 3,6 é 21h em Brasília)
+on:
+  schedule:
+    # Rodar quarta-feira (3) e sábado (6). Altere o "0 3" para o horário desejado em UTC.
+    - cron: '0 3 * * 3,6' 
+
+jobs:
+  run_script:
+    # Usar um runner Ubuntu no GitHub
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x' # Use a versão mais recente do Python 3
+        
+    - name: Install Dependencies (Poetry)
+      run: |
+        pip install poetry
+        poetry install --no-root
+        
+    - name: Run Prediction Script
+      env:
+        # Configura as variáveis de ambiente do Telegram
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+      run: poetry run python predictor.py
