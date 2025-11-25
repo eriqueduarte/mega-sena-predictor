@@ -23,6 +23,8 @@ TELEGRAM_CHAT_IDS = [id.strip() for id in chat_ids_str.split(',') if id.strip()]
 
 # --- FUNÇÕES DE UTILIDADE E NOTIFICAÇÃO ---
 
+# predictor.py
+
 def send_telegram_message(message: str):
     """Envia a mensagem de texto para a lista de chats configurados de forma assíncrona."""
     
@@ -33,29 +35,39 @@ def send_telegram_message(message: str):
     try:
         from telegram import Bot
         
-        # Função assíncrona que envia a mensagem para um ID específico
         async def send_to_recipient(chat_id):
             bot = Bot(token=TELEGRAM_TOKEN)
-            # await é crucial para operações assíncronas
             await bot.send_message(chat_id=chat_id, text=message, parse_mode='HTML')
             print(f"   -> Mensagem enviada para o Chat ID: {chat_id}")
 
-        # Cria uma lista de tarefas assíncronas (uma para cada destinatário)
-        tasks = [send_to_recipient(chat_id) for chat_id in TELEGRAM_CHAT_IDS]
-        
-        print(f"\nIniciando o envio para {len(tasks)} destinatário(s) configurado(s)...")
-        
-        # Usa asyncio.run para rodar as tarefas (IMPORTANTE para ambientes sem loop)
-        asyncio.run(asyncio.gather(*tasks)) 
-        
-        print("✅ Envio de previsão concluído para todos os destinatários.")
-        
+        async def main_async_sender():
+            """Função wrapper assíncrona para rodar todas as tarefas."""
+            tasks = [send_to_recipient(chat_id) for chat_id in TELEGRAM_CHAT_IDS]
+            print(f"\nIniciando o envio para {len(tasks)} destinatário(s) configurado(s)...")
+            await asyncio.gather(*tasks)
+            print("✅ Envio de previsão concluído para todos os destinatários.")
+            
+        # Tenta obter o loop atual ou criar um novo se não houver
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        # Se o loop estiver rodando, agendamos a tarefa. Caso contrário, rodamos ele.
+        if loop.is_running():
+            # Agendar a tarefa e aguardar a conclusão
+            loop.run_until_complete(main_async_sender())
+        else:
+            # Rodar a tarefa e iniciar o loop
+            loop.run_until_complete(main_async_sender())
+            
     except ImportError:
         print("❌ Erro: Instale 'python-telegram-bot' com 'poetry add python-telegram-bot'.")
     except Exception as e:
-        # Se ocorrer um erro de API (401, 400), ele será printado aqui
         print(f"❌ Erro ao enviar mensagem para o Telegram. Verifique Token/IDs: {e}") 
 
+# ... (Mantenha o resto do código, INCLUINDO o bloco if __name__ == "__main__" que você criou, pois ele é a melhor prática.)
 
 # --- FUNÇÃO DE BUSCA DE API ---
 
