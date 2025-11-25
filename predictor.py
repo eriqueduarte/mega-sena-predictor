@@ -1,10 +1,11 @@
-# predictor.py - VERSÃO FINAL, FUNCIONAL E SEGURA PARA GITHUB ACTIONS
+# predictor.py - VERSÃO UNIFICADA E ESTÁVEL PARA GITHUB ACTIONS
 
 import pandas as pd
 import requests
 import random
 import os
 import asyncio 
+from concurrent.futures import ThreadPoolExecutor
 
 # --- CONFIGURAÇÕES DE ARQUIVOS E API ---
 DATA_FILE_RAW = "mega.csv" 
@@ -14,20 +15,15 @@ DATA_FILE_CLEAN = "megasena_historico_limpo.csv"
 API_URL_LATEST = "https://loteriascaixa-api.herokuapp.com/api/megasena/latest"
 
 # 🚨 CONFIGURAÇÃO DO TELEGRAM (LENDO DE VARIÁVEIS DE AMBIENTE/SECRETS) 🚨
-# O GitHub Actions injeta os valores nas variáveis de ambiente!
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "TOKEN_DE_SEGURANCA_AQUI")
-
-# Recebe os IDs como uma única string separada por vírgulas e a converte em lista de IDs
 chat_ids_str = os.environ.get("TELEGRAM_CHAT_IDS", "")
 TELEGRAM_CHAT_IDS = [id.strip() for id in chat_ids_str.split(',') if id.strip()]
 
-# --- FUNÇÕES DE UTILIDADE E NOTIFICAÇÃO ---
 
-# predictor.py
+# --- FUNÇÃO DE ENVIO TELEGRAM (ESTÁVEL) ---
 
-def send_telegram_message(message: str):
-    """Envia a mensagem de texto para a lista de chats configurados de forma assíncrona."""
-    
+async def async_send_telegram_message(message: str):
+    """Função assíncrona real que faz o envio da mensagem."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_IDS or TELEGRAM_CHAT_IDS == [""]:
         print("❌ Erro: Token ou Chat IDs do Telegram não configurados nas variáveis de ambiente.")
         return
@@ -35,63 +31,48 @@ def send_telegram_message(message: str):
     try:
         from telegram import Bot
         
-        # Função assíncrona que envia a mensagem para um ID específico
         async def send_to_recipient(chat_id):
             bot = Bot(token=TELEGRAM_TOKEN)
-            # await é crucial para operações assíncronas
             await bot.send_message(chat_id=chat_id, text=message, parse_mode='HTML')
             print(f"   -> Mensagem enviada para o Chat ID: {chat_id}")
 
-        # Cria uma lista de tarefas assíncronas (uma para cada destinatário)
         tasks = [send_to_recipient(chat_id) for chat_id in TELEGRAM_CHAT_IDS]
         
         print(f"\nIniciando o envio para {len(tasks)} destinatário(s) configurado(s)...")
-        
-        # 🚨 TENTATIVA FINAL DE CORREÇÃO: Força a execução assíncrona aqui 🚨
-        asyncio.run(asyncio.gather(*tasks)) 
+        await asyncio.gather(*tasks) 
         
         print("✅ Envio de previsão concluído para todos os destinatários.")
         
     except ImportError:
         print("❌ Erro: Instale 'python-telegram-bot' com 'poetry add python-telegram-bot'.")
     except Exception as e:
-        # Se ocorrer um erro de API (401, 400), ele será printado aqui
+        # Erros da API do Telegram (401, 400) ou de rede cairão aqui
         print(f"❌ Erro ao enviar mensagem para o Telegram. Verifique Token/IDs: {e}") 
-        
-# ... (O resto do código: Funções de análise)
 
-# --- Execução Principal CORRIGIDA FINAL ---
-# Esta é a parte que deve resolver o conflito forçando um ambiente novo
-async def async_main_wrapper():
-    """Wrapper para permitir que o main() rode dentro de um loop de eventos."""
-    # Como main() chama send_telegram_message (que usa asyncio.run), não precisamos do await aqui.
-    main()
-
-if __name__ == "__main__":
+def send_telegram_message(message: str):
+    """Função síncrona que chama a função assíncrona de forma segura (sem conflito de loop)."""
+    # Usa asyncio.run para rodar a função async_send_telegram_message em uma thread separada.
+    # Esta é a maneira mais robusta de chamar código assíncrono de um código síncrono.
     try:
-        # Tenta a abordagem mais limpa do asyncio.run
-        asyncio.run(async_main_wrapper())
+        asyncio.run(async_send_telegram_message(message))
     except RuntimeError as e:
-        # Se o loop já estiver rodando (o erro "This event loop is already running"),
-        # usamos um mecanismo de agendamento em thread separada (executor)
-        if "already running" in str(e) or "cannot run non-coroutine" in str(e):
-            print("⚠️ Aviso: Loop de eventos já em execução. Usando ThreadPoolExecutor...")
-            from concurrent.futures import ThreadPoolExecutor
-            # Roda a função principal em uma thread separada para evitar conflito
+        # Se ocorrer o erro "already running", tenta uma ThreadPoolExecutor como fallback.
+        if "already running" in str(e):
+            print("⚠️ Aviso: Loop já em execução. Tentando ThreadPoolExecutor...")
             with ThreadPoolExecutor(max_workers=1) as executor:
                 loop = asyncio.get_event_loop()
-                loop.run_in_executor(executor, main)
+                # Agenda a função async para rodar no loop existente
+                loop.run_in_executor(executor, lambda: asyncio.run(async_send_telegram_message(message)))
         else:
-            print(f"❌ Erro fatal do asyncio: {e}")
+             print(f"❌ Erro de runtime no envio de Telegram: {e}")
     except Exception as e:
-         print(f"❌ Erro inesperado na execução principal: {e}")
-
-# ... (Mantenha o resto do código, INCLUINDO o bloco if __name__ == "__main__" que você criou, pois ele é a melhor prática.)
+         print(f"❌ Erro inesperado no envio de Telegram: {e}")
 
 # --- FUNÇÃO DE BUSCA DE API ---
-
+# (MANTENHA ESTA FUNÇÃO COMPLETA, como você a tinha antes)
 def fetch_latest_result(last_concurso_number):
     """Busca o último concurso na API do GitHub e retorna o resultado se for novo."""
+    # ... (Conteúdo completo da sua função fetch_latest_result)
     try:
         print(f">>> Buscando último resultado em: {API_URL_LATEST}")
         response = requests.get(API_URL_LATEST, timeout=15)
@@ -132,11 +113,10 @@ def fetch_latest_result(last_concurso_number):
         print(f"❌ Erro inesperado no processamento da API: {e}")
         return None
 
-# --- FUNÇÕES DE ANÁLISE DE DADOS (Inalteradas) ---
-
+# --- FUNÇÕES DE ANÁLISE DE DADOS ---
+# (MANTENHA ESTAS FUNÇÕES COMPLETAS, como você as tinha antes)
 def load_and_clean_data():
-    """Carrega, limpa e prepara os dados para análise."""
-    
+    # ... (Conteúdo completo da load_and_clean_data)
     if os.path.exists(DATA_FILE_CLEAN):
         try:
             print(f">>> Carregando dados do CSV limpo: '{DATA_FILE_CLEAN}'...")
@@ -191,7 +171,7 @@ def load_and_clean_data():
         return None
 
 def get_frequency_analysis(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcula a frequência absoluta de cada dezena já sorteada."""
+    # ... (Conteúdo completo da get_frequency_analysis)
     all_dezenas = pd.concat([df[col] for col in df.columns if 'Dezena' in col])
     all_dezenas = all_dezenas.dropna().astype(int) 
     
@@ -205,7 +185,7 @@ def get_frequency_analysis(df: pd.DataFrame) -> pd.DataFrame:
     return frequency
 
 def predict_next_game(df: pd.DataFrame, num_jogos: int = 1) -> tuple:
-    """Gera previsões estatísticas."""
+    # ... (Conteúdo completo da predict_next_game)
     frequency_df = get_frequency_analysis(df)
     
     if frequency_df.empty:
@@ -286,24 +266,12 @@ def main():
     else:
         print(f"✅ Histórico já atualizado. Nenhuma ação necessária.")
 
-# --- Execução Principal CORRIGIDA ---
-# Função wrapper para garantir o loop de eventos assíncronos no GitHub Actions
 
-async def async_main_wrapper():
-    """Wrapper para permitir que o main() rode dentro de um loop de eventos."""
-    # O await aqui garante que as chamadas internas assíncronas possam ser feitas
-    main()
+# --- Execução Principal (PONTO DE ENTRADA) ---
 
 if __name__ == "__main__":
+    # Esta é a única chamada de entrada para o script.
     try:
-        # Usa o asyncio.run() para iniciar o loop de eventos e rodar a função
-        asyncio.run(async_main_wrapper())
-        
-    except RuntimeError as e:
-        # Tenta um fallback síncrono em ambientes específicos que podem rejeitar o asyncio.run
-        if "cannot run non-coroutine" in str(e):
-             main() 
-        else:
-             print(f"❌ Erro fatal do asyncio: {e}")
+        main()
     except Exception as e:
          print(f"❌ Erro inesperado na execução principal: {e}")
