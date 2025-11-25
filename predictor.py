@@ -35,37 +35,56 @@ def send_telegram_message(message: str):
     try:
         from telegram import Bot
         
+        # Função assíncrona que envia a mensagem para um ID específico
         async def send_to_recipient(chat_id):
             bot = Bot(token=TELEGRAM_TOKEN)
+            # await é crucial para operações assíncronas
             await bot.send_message(chat_id=chat_id, text=message, parse_mode='HTML')
             print(f"   -> Mensagem enviada para o Chat ID: {chat_id}")
 
-        async def main_async_sender():
-            """Função wrapper assíncrona para rodar todas as tarefas."""
-            tasks = [send_to_recipient(chat_id) for chat_id in TELEGRAM_CHAT_IDS]
-            print(f"\nIniciando o envio para {len(tasks)} destinatário(s) configurado(s)...")
-            await asyncio.gather(*tasks)
-            print("✅ Envio de previsão concluído para todos os destinatários.")
-            
-        # Tenta obter o loop atual ou criar um novo se não houver
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        # Se o loop estiver rodando, agendamos a tarefa. Caso contrário, rodamos ele.
-        if loop.is_running():
-            # Agendar a tarefa e aguardar a conclusão
-            loop.run_until_complete(main_async_sender())
-        else:
-            # Rodar a tarefa e iniciar o loop
-            loop.run_until_complete(main_async_sender())
-            
+        # Cria uma lista de tarefas assíncronas (uma para cada destinatário)
+        tasks = [send_to_recipient(chat_id) for chat_id in TELEGRAM_CHAT_IDS]
+        
+        print(f"\nIniciando o envio para {len(tasks)} destinatário(s) configurado(s)...")
+        
+        # 🚨 TENTATIVA FINAL DE CORREÇÃO: Força a execução assíncrona aqui 🚨
+        asyncio.run(asyncio.gather(*tasks)) 
+        
+        print("✅ Envio de previsão concluído para todos os destinatários.")
+        
     except ImportError:
         print("❌ Erro: Instale 'python-telegram-bot' com 'poetry add python-telegram-bot'.")
     except Exception as e:
+        # Se ocorrer um erro de API (401, 400), ele será printado aqui
         print(f"❌ Erro ao enviar mensagem para o Telegram. Verifique Token/IDs: {e}") 
+        
+# ... (O resto do código: Funções de análise)
+
+# --- Execução Principal CORRIGIDA FINAL ---
+# Esta é a parte que deve resolver o conflito forçando um ambiente novo
+async def async_main_wrapper():
+    """Wrapper para permitir que o main() rode dentro de um loop de eventos."""
+    # Como main() chama send_telegram_message (que usa asyncio.run), não precisamos do await aqui.
+    main()
+
+if __name__ == "__main__":
+    try:
+        # Tenta a abordagem mais limpa do asyncio.run
+        asyncio.run(async_main_wrapper())
+    except RuntimeError as e:
+        # Se o loop já estiver rodando (o erro "This event loop is already running"),
+        # usamos um mecanismo de agendamento em thread separada (executor)
+        if "already running" in str(e) or "cannot run non-coroutine" in str(e):
+            print("⚠️ Aviso: Loop de eventos já em execução. Usando ThreadPoolExecutor...")
+            from concurrent.futures import ThreadPoolExecutor
+            # Roda a função principal em uma thread separada para evitar conflito
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                loop = asyncio.get_event_loop()
+                loop.run_in_executor(executor, main)
+        else:
+            print(f"❌ Erro fatal do asyncio: {e}")
+    except Exception as e:
+         print(f"❌ Erro inesperado na execução principal: {e}")
 
 # ... (Mantenha o resto do código, INCLUINDO o bloco if __name__ == "__main__" que você criou, pois ele é a melhor prática.)
 
