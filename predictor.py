@@ -1,15 +1,17 @@
-# predictor.py - VERSÃO UNIFICADA E ESTÁVEL PARA GITHUB ACTIONS
+# predictor.py - VERSÃO UNIFICADA E ESTÁVEL COM VALIDAÇÃO DE PREVISÃO
 
 import pandas as pd
 import requests
 import random
 import os
 import asyncio 
+import json # NOVO: Para salvar e carregar o estado do preditor
 from concurrent.futures import ThreadPoolExecutor
 
 # --- CONFIGURAÇÕES DE ARQUIVOS E API ---
 DATA_FILE_RAW = "mega.csv" 
 DATA_FILE_CLEAN = "megasena_historico_limpo.csv"
+STATE_FILE = "predictor_state.json" # NOVO: Arquivo para salvar o estado (previsão anterior e acertos)
 
 # API pública gratuita de resultados de Loterias CAIXA
 API_URL_LATEST = "https://loteriascaixa-api.herokuapp.com/api/megasena/latest"
@@ -51,28 +53,53 @@ async def async_send_telegram_message(message: str):
 
 def send_telegram_message(message: str):
     """Função síncrona que chama a função assíncrona de forma segura (sem conflito de loop)."""
-    # Usa asyncio.run para rodar a função async_send_telegram_message em uma thread separada.
-    # Esta é a maneira mais robusta de chamar código assíncrono de um código síncrono.
     try:
         asyncio.run(async_send_telegram_message(message))
     except RuntimeError as e:
-        # Se ocorrer o erro "already running", tenta uma ThreadPoolExecutor como fallback.
         if "already running" in str(e):
             print("⚠️ Aviso: Loop já em execução. Tentando ThreadPoolExecutor...")
             with ThreadPoolExecutor(max_workers=1) as executor:
                 loop = asyncio.get_event_loop()
-                # Agenda a função async para rodar no loop existente
                 loop.run_in_executor(executor, lambda: asyncio.run(async_send_telegram_message(message)))
         else:
              print(f"❌ Erro de runtime no envio de Telegram: {e}")
     except Exception as e:
          print(f"❌ Erro inesperado no envio de Telegram: {e}")
 
+# --- FUNÇÕES DE PERSISTÊNCIA DE ESTADO (NOVAS) ---
+
+def load_state():
+    """Carrega o estado do preditor (última previsão feita, total de acertos)."""
+    default_state = {
+        'last_predicted_concurso': 0,
+        'last_predictions': [],
+        'total_sena_hits': 0,
+        'total_quina_hits': 0,
+        'total_quadra_hits': 0
+    }
+    if os.path.exists(STATE_FILE):
+        try:
+            print(f">>> Carregando estado do preditor de: '{STATE_FILE}'...")
+            with open(STATE_FILE, 'r') as f:
+                state = json.load(f)
+                # Garante que o estado tenha todas as chaves
+                return {**default_state, **state} 
+        except Exception as e:
+            print(f"⚠️ Aviso: Erro ao carregar estado do preditor ({e}). Iniciando com estado padrão.")
+    return default_state
+
+def save_state(state):
+    """Salva o estado atual do preditor."""
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=4)
+        print(f">>> Estado do preditor salvo em: '{STATE_FILE}'")
+    except Exception as e:
+        print(f"❌ Erro ao salvar estado do preditor: {e}")
+
 # --- FUNÇÃO DE BUSCA DE API ---
-# (MANTENHA ESTA FUNÇÃO COMPLETA, como você a tinha antes)
 def fetch_latest_result(last_concurso_number):
     """Busca o último concurso na API do GitHub e retorna o resultado se for novo."""
-    # ... (Conteúdo completo da sua função fetch_latest_result)
     try:
         print(f">>> Buscando último resultado em: {API_URL_LATEST}")
         response = requests.get(API_URL_LATEST, timeout=15)
@@ -97,7 +124,8 @@ def fetch_latest_result(last_concurso_number):
                 'Dezena3': dezenas_sorteadas[2], 
                 'Dezena4': dezenas_sorteadas[3], 
                 'Dezena5': dezenas_sorteadas[4], 
-                'Dezena6': dezenas_sorteadas[5]
+                'Dezena6': dezenas_sorteadas[5],
+                'DezenasSorteadas': dezenas_sorteadas # Adiciona a lista de dezenas para facilitar a validação
             }
             return novo_resultado
         else:
@@ -114,9 +142,7 @@ def fetch_latest_result(last_concurso_number):
         return None
 
 # --- FUNÇÕES DE ANÁLISE DE DADOS ---
-# (MANTENHA ESTAS FUNÇÕES COMPLETAS, como você as tinha antes)
 def load_and_clean_data():
-    # ... (Conteúdo completo da load_and_clean_data)
     if os.path.exists(DATA_FILE_CLEAN):
         try:
             print(f">>> Carregando dados do CSV limpo: '{DATA_FILE_CLEAN}'...")
@@ -171,7 +197,6 @@ def load_and_clean_data():
         return None
 
 def get_frequency_analysis(df: pd.DataFrame) -> pd.DataFrame:
-    # ... (Conteúdo completo da get_frequency_analysis)
     all_dezenas = pd.concat([df[col] for col in df.columns if 'Dezena' in col])
     all_dezenas = all_dezenas.dropna().astype(int) 
     
@@ -185,7 +210,6 @@ def get_frequency_analysis(df: pd.DataFrame) -> pd.DataFrame:
     return frequency
 
 def predict_next_game(df: pd.DataFrame, num_jogos: int = 1) -> tuple:
-    # ... (Conteúdo completo da predict_next_game)
     frequency_df = get_frequency_analysis(df)
     
     if frequency_df.empty:
@@ -216,15 +240,37 @@ def predict_next_game(df: pd.DataFrame, num_jogos: int = 1) -> tuple:
         
     return predictions, frequency_df.head(10).to_string(index=False) 
 
-# --- FUNÇÃO PRINCIPAL DE AUTOMAÇÃO ---
+# --- FUNÇÃO DE VALIDAÇÃO (NOVA) ---
+
+def check_prediction_hit(predicted_games: list[list[int]], drawn_numbers: list[int]) -> tuple[int, int]:
+    """Compara as previsões com as dezenas sorteadas. Retorna o maior número de acertos e o índice do jogo."""
+    max_hits = 0
+    best_game_index = 0
+    
+    drawn_set = set(drawn_numbers)
+    
+    for i, game in enumerate(predicted_games, 1):
+        game_set = set(game)
+        hits = len(game_set.intersection(drawn_set))
+        
+        if hits > max_hits:
+            max_hits = hits
+            best_game_index = i
+            
+    return max_hits, best_game_index
+
+# --- FUNÇÃO PRINCIPAL DE AUTOMAÇÃO (MODIFICADA) ---
 
 def main():
-    """Função principal para executar a análise e notificar automaticamente."""
+    """Função principal para executar a análise, validar a previsão e notificar automaticamente."""
     
+    # 1. Carregar dados de histórico
     df = load_and_clean_data()
-    
     if df is None:
         return
+        
+    # 2. Carregar estado do preditor
+    predictor_state = load_state()
     
     try:
         last_concurso_number = int(df['Concurso'].max())
@@ -234,32 +280,102 @@ def main():
         
     print(f"\n--- Iniciando Verificação Automática (Último Concurso Analisado: {last_concurso_number}) ---")
 
+    # 3. Buscar novo resultado
     novo_resultado = fetch_latest_result(last_concurso_number)
 
     if novo_resultado:
         print(f"🎉 Novo concurso {novo_resultado['Concurso']} encontrado! Atualizando histórico e gerando previsão...")
         
-        new_df_row = pd.DataFrame([novo_resultado])
-        df = pd.concat([df, new_df_row], ignore_index=True)
+        concurso_sorteado = novo_resultado['Concurso']
+        dezenas_sorteadas = novo_resultado['DezenasSorteadas']
         
+        # Atualizar histórico (df)
+        new_df_row = pd.DataFrame([{k: novo_resultado[k] for k in novo_resultado if k != 'DezenasSorteadas'}])
+        df = pd.concat([df, new_df_row], ignore_index=True)
         df.to_csv(DATA_FILE_CLEAN, index=False, sep=';', encoding='iso-8859-1')
         
+        # --- NOVO: VALIDAÇÃO DA PREVISÃO ANTERIOR ---
+        
+        validation_message = ""
+        
+        if (predictor_state['last_predicted_concurso'] == concurso_sorteado and 
+            predictor_state['last_predictions']):
+            
+            # A previsão a ser checada é a que foi feita para o concurso sorteado atual
+            last_predictions = [list(map(int, p)) for p in predictor_state['last_predictions']]
+            max_hits, best_game_index = check_prediction_hit(last_predictions, dezenas_sorteadas)
+            
+            # Atualizar contadores
+            if max_hits == 6:
+                predictor_state['total_sena_hits'] += 1
+                hit_name = "SENA"
+            elif max_hits == 5:
+                predictor_state['total_quina_hits'] += 1
+                hit_name = "QUINA"
+            elif max_hits == 4:
+                predictor_state['total_quadra_hits'] += 1
+                hit_name = "QUADRA"
+            else:
+                hit_name = f"{max_hits} acertos"
+
+            print(f"✅ Validação: Previsão do Concurso {concurso_sorteado} resultou em {max_hits} acertos.")
+
+            if max_hits >= 4:
+                validation_message = (
+                    f"\n⭐ <b>VALORIZAÇÃO da Previsão do Concurso {concurso_sorteado}:</b>\n"
+                    f"  O Jogo <b>{best_game_index}</b> acertou <b>{max_hits} dezenas</b> ({hit_name})! 🎉"
+                )
+            else:
+                 validation_message = (
+                    f"\n😐 <b>VALORIZAÇÃO da Previsão do Concurso {concurso_sorteado}:</b>\n"
+                    f"  Maior acerto: <b>{max_hits} dezenas</b>."
+                )
+
+        else:
+            validation_message = "\n⚠️ Aviso: Não foi possível validar a previsão anterior (dados ausentes/inconsistentes)."
+
+        # --- FIM VALIDAÇÃO ---
+
+        # --- GERAÇÃO E ARMAZENAMENTO DA NOVA PREVISÃO ---
         predictions, top_frequency_str = predict_next_game(df, 3)
         
-        dezenas_formatadas = ' - '.join(str(int(novo_resultado[f'Dezena{i}'])).zfill(2) for i in range(1, 7))
+        # Salvar novo estado para a próxima execução
+        predictor_state['last_predicted_concurso'] = concurso_sorteado + 1 # Previsão é para o próximo concurso
+        # Salva as previsões como strings para serialização JSON
+        predictor_state['last_predictions'] = [list(map(str, p)) for p in predictions] 
+        save_state(predictor_state)
+
+        # --- PREPARAR MENSAGEM TELEGRAM ---
         
+        dezenas_sorteadas_formatadas = ' - '.join(str(d).zfill(2) for d in dezenas_sorteadas)
+
         message = (
             f"<b>🎰 NOVA PREVISÃO MEGA SENA AUTOMÁTICA</b>\n"
-            f"Último Concurso Sorteado: <b>{novo_resultado['Concurso']}</b>\n"
-            f"Resultado: <b>{dezenas_formatadas}</b>\n\n"
-            f"🧠 <b>Próximos 3 Jogos Recomendados:</b>\n"
+            f"Último Concurso Sorteado: <b>{concurso_sorteado}</b>\n"
+            f"Resultado: <b>{dezenas_sorteadas_formatadas}</b>"
         )
+        
+        # Adicionar mensagem de validação
+        message += validation_message 
+        
+        # Adicionar total de acertos
+        hits_summary = (
+            f"\n\n🏆 <b>ESTATÍSTICAS DO PREDITOR (Total Acertos):</b>\n"
+            f"  Sena (6 acertos): <b>{predictor_state['total_sena_hits']}</b> vez(es)\n"
+            f"  Quina (5 acertos): <b>{predictor_state['total_quina_hits']}</b> vez(es)\n"
+            f"  Quadra (4 acertos): <b>{predictor_state['total_quadra_hits']}</b> vez(es)"
+        )
+        message += hits_summary
+        
+        # Adicionar nova previsão
+        message += f"\n\n🧠 <b>Próximos 3 Jogos Recomendados (Concurso {concurso_sorteado + 1}):</b>\n"
+        
         for i, jogo in enumerate(predictions, 1):
             jogo_formatado = ' - '.join(str(int(x)).zfill(2) for x in jogo)
             message += f"  Jogo {i}: <code>{jogo_formatado}</code>\n" 
         
         message += f"\n📊 <b>Dezenas Mais Frequentes (Top 10):</b>\n"
-        message += f"<pre>{top_frequency_str}</pre>" 
+        message += f"<pre>{top_frequency_str}</pre>"
         
         send_telegram_message(message)
         
@@ -270,7 +386,6 @@ def main():
 # --- Execução Principal (PONTO DE ENTRADA) ---
 
 if __name__ == "__main__":
-    # Esta é a única chamada de entrada para o script.
     try:
         main()
     except Exception as e:
